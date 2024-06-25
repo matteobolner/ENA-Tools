@@ -1,32 +1,27 @@
 import pandas as pd
+from multiprocessing.pool import ThreadPool
+from tqdm import tqdm
+from utilities import *
+from multiprocessing.pool import ThreadPool
+import numpy as np
 
-def get_fao_breeds_dataset(self):
+def get_fao_breeds_dataset(species):
     fao_dataset=pd.read_csv(f"https://raw.githubusercontent.com/matteobolner/livestock_breeds_database/main/species/{species}/all_breeds.csv")
     fao_dataset['breed_no_diacritics']=fao_dataset['Breed/Most common name'].dropna().apply(remove_diacritics)
     fao_dataset['breed_letters_only']=fao_dataset['Breed/Most common name'].apply(strip_string_down_to_letters)
     fao_dataset=fao_dataset[fao_dataset['Breed/Most common name'].apply(len)>=3]
-    return(fao_dataset)
+    return fao_dataset
 
-def get_fao_breeds_stripped_list(self):
-    fao_breeds_list=self.get_fao_breeds_dataset()['breed_letters_only'].unique().tolist()
-    return(fao_breeds_list)
+def get_fao_breeds_stripped_list(species):
+    fao_breeds_list=get_fao_breeds_dataset(species)['breed_letters_only'].unique().tolist()
+    return fao_breeds_list
 
-def count_breed_occurrences_in_string(self, sample, breed_list, input_string):
+def count_breed_occurrences_in_string(sample, breed_list, input_string):
     counts = {substring: len(re.findall(substring, input_string)) for substring in breed_list}
     counts = {k:v for k,v in counts.items() if v!=0}
-    return(counts)
+    return counts
 
-
-def annotate_biosamples_with_breeds(self, breed_list='FAO', db='default', thread_number=4):
-    if breed_list=='FAO':
-        breed_list=self.get_fao_breeds_stripped_list()
-    if isinstance(db, pd.DataFrame):
-        biosamples=db
-    elif (isinstance(db, str))&(db=='default'):
-        biosamples=self.biosamples_db
-    else:
-        raise Exception("Unclear format for BioSamples DB")
-    #biosamples=test
+def annotate_sample_with_breed(breed_list,biosamples,thread_number=4):
     datetimes_and_urls=[]
     counter=0
     for col in biosamples.columns:
@@ -43,14 +38,15 @@ def annotate_biosamples_with_breeds(self, breed_list='FAO', db='default', thread
     biosamples=biosamples.drop(columns=['INSDC center name'])
     biosamples=biosamples.dropna(how='all', axis=1)
     biosamples=biosamples.dropna(how='all', axis=0)
-    biosamples_stripped=biosamples.set_index('sample_accession').apply(lambda row: row.dropna().astype(str).str.cat(sep=' '), axis=1).apply(self.strip_string_down_to_letters)
+    biosamples_stripped=biosamples.set_index('sample_accession').apply(lambda row: row.dropna().astype(str).str.cat(sep=' '), axis=1).apply(strip_string_down_to_letters)
 
     def annotate_sample_breed(sample_stripped_info):
         pbar.update(1)
         id=sample_stripped_info[0]
         info=sample_stripped_info[1]
-        counts={id:self.count_breed_occurrences_in_string(sample=id, breed_list=breed_list, input_string=info)}
+        counts={id:count_breed_occurrences_in_string(sample=id, breed_list=breed_list, input_string=info)}
         return(counts)
+
     pbar = tqdm(total=len(biosamples))
     pool = ThreadPool(thread_number)
     annotated_samples = pool.map(annotate_sample_breed, list(biosamples_stripped.items()))
